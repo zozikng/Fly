@@ -1,0 +1,426 @@
+<!-- 重点参数：renderOptions -->
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <!-- 原始地址：//webapi.amap.com/ui/1.1/ui/misc/PathSimplifier/examples/navigators.html -->
+  <base href="//webapi.amap.com/ui/1.1/ui/misc/PathSimplifier/examples/" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+  <title>轨迹巡航控制</title>
+  <style>
+    #container,
+    body,
+    html {
+      height: 100%;
+      width: 100%
+    }
+
+    #loadingTip,
+    #panel {
+      position: absolute;
+      top: 0
+    }
+
+    body,
+    html {
+      margin: 0;
+      font-size: 12px
+    }
+
+    #outer-box {
+      height: 100%;
+      padding-right: 300px;
+    }
+
+    #panel {
+      right: 0;
+      width: 300px;
+      z-index: 999;
+      height: calc(100% - 5px);
+      overflow: hidden;
+      overflow-y: auto
+    }
+
+    #routes-container {
+      height: 1200px;
+      margin-left: 10px
+    }
+
+    #loadingTip {
+      z-index: 9999;
+      left: 0;
+      padding: 3px 10px;
+      background: red;
+      color: #fff;
+      font-size: 13px
+    }
+
+    .route-item {
+      margin-bottom: 10px
+    }
+
+    .route-item pre {
+      margin: 0
+    }
+
+    .route-item h3 {
+      margin: 5px 0;
+      font-size: 14px;
+      cursor: pointer
+    }
+
+    .hide {
+      display: none
+    }
+
+    .speedBox {
+      padding: 5px 0
+    }
+
+    .speedRange {
+      vertical-align: middle;
+      margin: 0;
+      padding: 0;
+      width: 100px
+    }
+
+    .markerInfo {
+      background: rgba(255, 255, 255, 0.7);
+      padding: 2px 5px;
+      border: 1px solid #ccc;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+
+<body>
+<div id="outer-box">
+  <div id="container">
+  </div>
+  <div id="panel">
+    <div id="routes-container">
+    </div>
+  </div>
+</div>
+<script type="text/javascript" src='//webapi.amap.com/maps?v=2.0&key=c589afd92be904044d680df23a7bc9a6'></script>
+<!-- UI组件库 1.0 -->
+<script src="//webapi.amap.com/ui/1.1/main.js?v=1.1.1"></script>
+<script type="text/javascript">
+  //创建地图
+  var map = new AMap.Map('container', {
+    zoom: 4
+  });
+
+  AMapUI.load(['ui/misc/PathSimplifier', 'lib/$'], function(PathSimplifier, $) {
+
+    if (!PathSimplifier.supportCanvas) {
+      alert('当前环境不支持 Canvas！');
+      return;
+    }
+
+    //just some colors
+    var colors = [
+      "#3366cc", "#dc3912", "#ff9900", "#109618", "#990099", "#0099c6", "#dd4477", "#66aa00",
+      "#b82e2e", "#316395", "#994499", "#22aa99", "#aaaa11", "#6633cc", "#e67300", "#8b0707",
+      "#651067", "#329262", "#5574a6", "#3b3eac"
+    ];
+
+    var pathSimplifierIns = new PathSimplifier({
+      zIndex: 100,
+      //autoSetFitView:false,
+      map: map, //所属的地图实例
+
+      getPath: function(pathData, pathIndex) {
+
+        return pathData.path;
+      },
+      getHoverTitle: function(pathData, pathIndex, pointIndex) {
+
+        if (pointIndex >= 0) {
+          //point
+          return pathData.name + '，点:' + pointIndex + '/' + pathData.path.length;
+        }
+
+        return pathData.name + '，点数量' + pathData.path.length;
+      },
+      renderOptions: {
+        pathLineStyle: {
+          dirArrowStyle: true
+        },
+        getPathStyle: function(pathItem, zoom) {
+
+          var color = colors[pathItem.pathIndex],
+            lineWidth = Math.round(4 * Math.pow(1.1, zoom - 3));
+
+          return {
+            pathLineStyle: {
+              strokeStyle: color,
+              lineWidth: lineWidth
+            },
+            pathLineSelectedStyle: {
+              lineWidth: lineWidth + 2
+            },
+            pathNavigatorStyle: {
+              fillStyle: color
+            }
+          }
+        }
+      }
+    });
+
+    var pathNavigs = [];
+
+    function getNavg(pathIndex) {
+
+      if (!pathNavigs[pathIndex]) {
+
+        //创建一个轨迹巡航器
+        var navgtr = pathSimplifierIns.createPathNavigator(pathIndex, {
+          loop: true,
+          speed: parseInt($('#speedInp_' + pathIndex).val())
+        });
+
+        var $markerContent = $('<div class="markerInfo"></div>');
+
+        $markerContent.html(pathSimplifierIns.getPathData(pathIndex).name);
+
+        navgtr.marker = new AMap.Marker({
+          offset: new AMap.Pixel(12, -10),
+          content: $markerContent.get(0),
+          map: map
+        });
+
+        var $msg = $('#routes-container').find('div.route-item[data-idx="' +
+          pathIndex + '"]').find('.msg');
+
+        navgtr.on('move', function() {
+          navgtr.marker.setPosition(navgtr.getPosition());
+        });
+
+        navgtr.onDestroy(function() {
+          pathNavigs[pathIndex] = null;
+          navgtr.marker.setMap(null);
+          $msg.html('');
+        });
+
+        navgtr.on('start resume', function() {
+          navgtr._startTime = Date.now();
+          navgtr._startDist = this.getMovedDistance();
+        });
+
+        navgtr.on('stop pause', function() {
+
+          navgtr._movedTime = Date.now() - navgtr._startTime;
+          navgtr._movedDist = this.getMovedDistance() - navgtr._startDist;
+
+          navgtr._realSpeed = (navgtr._movedDist / navgtr._movedTime * 3600);
+
+          var msgInfo = {
+            '状态': this.getNaviStatus(),
+            '设定速度': this.getSpeed() + ' km/h',
+            '总行进距离': Math.round(this.getMovedDistance() / 1000) + ' km',
+            '本段行进距离': Math.round(navgtr._movedDist / 1000) + ' km',
+            '本段耗时': (navgtr._movedTime / 1000) + ' s',
+            '本段实际速度': Math.round(navgtr._realSpeed) + ' km/h'
+          };
+
+          $msg.html('<pre>' + JSON.stringify(msgInfo, null, 2) + '</pre>');
+
+          refreshNavgButtons();
+        });
+
+        navgtr.on('move', function() {
+
+          var msgInfo = {
+            '状态': this.getNaviStatus(),
+            '设定速度': this.getSpeed() + ' km/h',
+            '总行进距离': Math.round(this.getMovedDistance() / 1000) + ' km'
+          };
+
+          $msg.html('<pre>' + JSON.stringify(msgInfo, null, 2) + '</pre>');
+        });
+
+        pathNavigs[pathIndex] = navgtr;
+      }
+
+      return pathNavigs[pathIndex];
+    }
+
+    var navigBtnsConf = [{
+      name: '开始巡航',
+      action: 'start',
+      enableExp: 'navgStatus === "stop" || navgStatus === "pause"'
+    }, {
+      name: '暂停',
+      action: 'pause',
+      enableExp: 'navgStatus === "moving"'
+    }, {
+      name: '恢复',
+      action: 'resume',
+      enableExp: 'navgStatus === "pause"'
+    }, {
+      name: '停止',
+      action: 'stop',
+      enableExp: 'navgStatus === "moving"'
+    }, {
+      name: '销毁',
+      action: 'destroy',
+      enableExp: 'navgExists'
+    }];
+
+    function refreshNavgButtons() {
+
+      $('#routes-container').find('div.route-item').each(function() {
+
+        var pathIndex = parseInt($(this).attr('data-idx'), 0);
+
+        if (pathIndex < 0) {
+          return;
+        }
+
+        var navgStatus = 'stop',
+          navgExists = !!pathNavigs[pathIndex];
+
+        if (navgExists) {
+          navgStatus = pathNavigs[pathIndex].getNaviStatus();
+        }
+
+        $(this).find('.navigBtn').each(function() {
+
+          var btnIdx = parseInt($(this).attr('data-btnIdx'));
+
+          $(this).prop('disabled', !eval(navigBtnsConf[btnIdx].enableExp));
+
+        });
+
+      });
+    }
+
+    function initRoutesContainer(data) {
+
+      $('#routes-container').on('click', '.navigBtn', function() {
+
+        var pathIndex = parseInt($(this).closest('.route-item').attr('data-idx'), 0);
+
+        var navg = getNavg(pathIndex);
+
+        navg[$(this).attr('data-act')]();
+
+        refreshNavgButtons();
+      });
+
+      for (var i = 0, len = data.length; i < len; i++) {
+        initRouteItem(data[i], i);
+      }
+
+      refreshNavgButtons();
+    }
+
+    function initRouteItem(pathData, idx) {
+
+      var $routeItem = $('<div class="route-item"></div>');
+
+      $routeItem.attr('data-idx', idx);
+
+      $('<h3/>').css({
+        color: colors[idx]
+      }).html(pathData.name + '(点数： ' + pathData.path.length + ')').appendTo($routeItem).on('click', function() {
+        pathSimplifierIns.setSelectedPathIndex(idx);
+      });
+
+
+      for (var i = 0, len = navigBtnsConf.length; i < len; i++) {
+        $('<button class="navigBtn" data-btnIdx="' + i + '" data-act="' + navigBtnsConf[i].action + '"></button>').html(navigBtnsConf[i].name).appendTo($routeItem);
+      }
+
+      $speedBox = $('<div class="speedBox"></div>').appendTo($routeItem);
+
+      var speedTxt = $('<span><span>').appendTo($speedBox);
+
+      var speedRangeInput = $('<input id="speedInp_' + idx +
+        '" class="speedRange" type="range" min="1000" max="1000000" step="1000" value="100000" />').appendTo($speedBox);
+
+      function updateSpeedTxt() {
+        var speed = parseInt(speedRangeInput.val(), 10);
+
+        speedTxt.html('时速：' + speed + ' km/h');
+
+        if (pathNavigs[idx]) {
+          pathNavigs[idx].setSpeed(speed);
+        }
+      }
+      speedRangeInput.on('change', updateSpeedTxt);
+
+      updateSpeedTxt();
+
+      $speedBox.appendTo($routeItem);
+
+      $('<div class="msg"></div>').appendTo($routeItem);
+
+      $routeItem.appendTo('#routes-container');
+    }
+
+    window.pathSimplifierIns = pathSimplifierIns;
+
+    $('<div id="loadingTip">加载数据，请稍候...</div>').appendTo(document.body);
+
+    $.getJSON('https://a.amap.com/amap-ui/static/data/big-routes.json', function(d) {
+
+      $('#loadingTip').remove();
+
+      var flyRoutes = [];
+
+      for (var i = 0, len = d.length; i < len; i++) {
+
+        if (d[i].name.indexOf('乌鲁木齐') >= 0) {
+
+          d.splice(i, 0, {
+            name: '飞行 - ' + d[i].name,
+            path: PathSimplifier.getGeodesicPath(
+              d[i].path[0], d[i].path[d[i].path.length - 1], 100)
+          });
+
+          i++;
+          len++;
+        }
+      }
+
+      d.push.apply(d, flyRoutes);
+
+      pathSimplifierIns.setData(d);
+
+      initRoutesContainer(d);
+
+      // for (var i = 0, len = d.length; i < 2; i++) {
+
+      //     (function(i) {
+
+      //         setTimeout(function() {
+
+      //             getNavg(i).start();
+
+      //             refreshNavgButtons();
+
+      //         }, 1000 * (i + 1));
+
+      //     })(i);
+      // }
+    });
+
+    pathSimplifierIns.on('selectedPathIndexChanged', function(e, info) {
+
+    });
+
+    pathSimplifierIns.on('pointClick pointMouseover pointMouseout', function(e, record) {
+      //console.log(e.type, record);
+    });
+
+    pathSimplifierIns.on('pathClick pathMouseover pathMouseout', function(e, record) {
+      //console.log(e.type, record);
+    });
+  });
+</script>
+</body>
+
+</html>
